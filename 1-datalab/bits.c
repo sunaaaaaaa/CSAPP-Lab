@@ -2,7 +2,7 @@
  * CS:APP Data Lab 
  * 
  * <Please put your name and userid here>
- * 
+ *    sun
  * bits.c - Source file with your solutions to the Lab.
  *          This is the file you will hand in to your instructor.
  *
@@ -141,19 +141,21 @@ NOTES:
  *   Legal ops: ~ &
  *   Max ops: 14
  *   Rating: 1
+ * 用按位与、按位取反实现按位异或
  */
 int bitXor(int x, int y) {
-  return 2;
+  return ~((~(x&~y)) & (~(~x&y)));
 }
 /* 
  * tmin - return minimum two's complement integer 
  *   Legal ops: ! ~ & ^ | + << >>
  *   Max ops: 4
  *   Rating: 1
+ *   返回最小的补码整数,即0xA0000000 
  */
 int tmin(void) {
 
-  return 2;
+  return 1<<31;
 
 }
 //2
@@ -163,9 +165,20 @@ int tmin(void) {
  *   Legal ops: ! ~ & ^ | +
  *   Max ops: 10
  *   Rating: 1
+ *  判断x是否为最大的补码整数，是的话则输出1，否则输出0
+ *  最大的补码整数为0x7fffffff
+ *  若为最大值，则第一位为0，+1后第一位变为1,即x + 1 = 0x80000000
+ *  因此 x & (x + 1) = 0
+ *  但要注意 -1的补码为0xffffffff,-1+1后产生0x00000000，此时也是0，需要再判定x不是-1
+ *  同时 0与0+1的与也为0
+ *  但是只有 x = 最大补码和 x = -1这两种情况下，x与x+1的各位不同(因为这两个值刚好是两次进位产生的时候)
+ *  只有这两种情况下，~(x ^ (x + 1)) = 0,此时取非即可
+ *  但还是要去掉 x = -1的情形，x = -1时，x + 1为0，而 x为最大补码时，x+1不为0,将x+1通过!!转化为0和1
+ *  然后再进行&运算即可
+ *  x为最大补码时，为1与1进行&   x=-1时，是1与0进行&运算  
  */
 int isTmax(int x) {
-  return 2;
+  return (!~((x ^ (x+1)))) & (!!(x + 1));
 }
 /* 
  * allOddBits - return 1 if all odd-numbered bits in word set to 1
