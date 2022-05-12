@@ -187,9 +187,13 @@ int isTmax(int x) {
  *   Legal ops: ! ~ & ^ | + << >>
  *   Max ops: 12
  *   Rating: 2
+ *  判断一个二进制数奇数位是否都为1，是的话返回1,否则返回0
+ *  0xAAAAAAAA是所有奇数位为1，偶数为为0的数，因此可以让x与其进行&运算，取出x的所有奇数位，然后再与0xAAAAAAAA判断是否相等
+ *  如果相等，那么输出1，否则输出0
+ *  判断使用异或操作,异或时，若x的所有奇数位与0xAAAAAAAA相等则输出0，此时需要取非操作
  */
 int allOddBits(int x) {
-  return 2;
+  return !((x & 0xAAAAAAAA) ^ 0xAAAAAAAA);
 }
 /* 
  * negate - return -x 
@@ -197,9 +201,10 @@ int allOddBits(int x) {
  *   Legal ops: ! ~ & ^ | + << >>
  *   Max ops: 5
  *   Rating: 2
+ * 取反操作，即求补数操作，各位取反+1 
  */
 int negate(int x) {
-  return 2;
+  return ~x + 1;
 }
 //3
 /* 
@@ -210,9 +215,16 @@ int negate(int x) {
  *   Legal ops: ! ~ & ^ | + << >>
  *   Max ops: 15
  *   Rating: 3
+ * 判断是否是ascii数字字符，只需要比较最后8bit即可，如果前面的bit位不等于0，则直接输出0
+ * 因此,用0xFFFFFF00进行&运算，再取非，如果前6字节不为0，则取非值为0，而若为0，则取非后值为1
+ * 此时再判断x是否处于 0x30-0x39这个区间即可,需要分两部分，判断倒数第二个字节是否为3,以及最后一个字节是否为0-9之间(即判断是否小于9)
+ * 最后三部分进行&操作，因为要同时满足
+ * 难点在于最后一部分如何判断小于9，由于最后一个字节最大可表示15，再大则会产生进位影响前面的字节，
+ * 因此我们可以让最后一个字节的数字与7进行相加，再判断是否影响了前面的字节
+ * 我们用0x00000010 & ((0xF & x) + 7) 取出第5bit，再右移四位，判断是否为1，如果为1，则说明产生了进位，说明最后的大于9
  */
 int isAsciiDigit(int x) {
-  return 2;
+  return !(0xFFFFFF00 & x) & !((0xF0 & x)^0x30) & !((0x00000010 & ((0xF & x) + 6)) >> 4);
 }
 /* 
  * conditional - same as x ? y : z 
@@ -220,9 +232,15 @@ int isAsciiDigit(int x) {
  *   Legal ops: ! ~ & ^ | + << >>
  *   Max ops: 16
  *   Rating: 3
+ * 需要判断x是否为true，即直接对x取非再取非即可转换为bool,然后再决定取y还是取z
+ * 如果x为0，应该输出z
+ * 如果x为1，应该输出y
+ * 综上，x --> ~(!!x)+1,利用补码性质，1的补码为0xffffffff,0的补码为0，与y进行&运算实现 x = 0时，(~(!!x)+1)&y = 0,x=1,该公式等于y
+ * x --> ~(!x)+1，实现x = 1时，生成全0，x = 0时，生成全1序列,然后与z进行 & 运算，实现x = 0时，(~(!x)+1)&z = 1，x=1,该式子等于0
+ * 将这两部分相加
  */
 int conditional(int x, int y, int z) {
-  return 2;
+  return ((~(!!x) + 1) & y) + ((~(!x) + 1) & z);
 }
 /* 
  * isLessOrEqual - if x <= y  then return 1, else return 0 
@@ -230,9 +248,26 @@ int conditional(int x, int y, int z) {
  *   Legal ops: ! ~ & ^ | + << >>
  *   Max ops: 24
  *   Rating: 3
+ * 转为：x-y <=0,先求x + y的补,即 x + (~y + 1)
+ * 然后用这个式子与0进行异或判断是否为0
+ * 再用这个式子右移31位，判断符号是否为1
+ * 需要考虑溢出 
  */
 int isLessOrEqual(int x, int y) {
-  return 2;
+  //x-y的值
+  int res = (x + (~y + 1));
+  //判断是否为0,当res为0时，返回1，符合要求，当res!=0,该部分为0，
+  //看下一部分判断是否小于等于0
+  int isZero = !res;
+  int isLess = (res >> 31) & 1;
+  //如果isLess为1，则说明是负数，即小于，当其最高为0时，需要判断是否发生了正溢出
+  //x > 0 ,-y >0 判断是否正溢出
+  //因此首先判断x与-y是否同号，再判断res是否异号，若异号则正溢出，此时应该去掉这种情况
+  int isOver = (!((x >> 31 & 1) ^ (!(y >> 31 &1)))) & (((x >> 31 & 1) ^ (res >> 31 &1)));
+  //该句是错误的，这是因为0x8000000的补码为其本身，-y应该是个正数，需要特殊对待
+  //因此采用上一句，取y的符号位并对其取反来得到-y的符号位，而不采用补码的形式
+  //int isOver = (!((x >> 31 & 1) ^ ((~y + 1) >> 31 &1))) & (((x >> 31 & 1) ^ (res >> 31 &1)));
+  return (isOver ^ isLess) | isZero;
 }
 //4
 /* 
@@ -241,10 +276,17 @@ int isLessOrEqual(int x, int y) {
  *   Examples: logicalNeg(3) = 0, logicalNeg(0) = 1
  *   Legal ops: ~ & ^ | + << >>
  *   Max ops: 12
- *   Rating: 4 
+ *   Rating: 4
+ * 实现逻辑取非运算符
+ * 判断x是否等于0,等于0的话将其转换为1，否则转换为0
+ * 如何把不为0的数转为-1呢,为0的保持不变
+ * 最后将结果+1即可
+ * 此时需要考虑 0的补码为0,最小值的补码为其本身,其他数的补码与自身按位或可以得到-1
+ * 因此 (x | (~x + 1)),此时只有最小值的情况下，为0x80000000 | 0x80000000 = 0x80000000
+ * 因此再算术右移31位，产生全1序列
  */
 int logicalNeg(int x) {
-  return 2;
+  return ((x | (~x + 1)) >> 31) + 1;
 }
 /* howManyBits - return the minimum number of bits required to represent x in
  *             two's complement
@@ -257,9 +299,30 @@ int logicalNeg(int x) {
  *  Legal ops: ! ~ & ^ | + << >>
  *  Max ops: 90
  *  Rating: 4
+ *  返回x的二进制补码所需要的最小的bit位，例如12为5位，不是四位是因为补码形式含有负数
+ *  由于补码取反后所需的位数和补码所需的位数是一样的，因此先统一转为正数
+ *  然后判断最左边的1，再加上符号位即可
  */
 int howManyBits(int x) {
-  return 0;
+
+  int b16,b8,b4,b2,b1,b0;
+    int flag=x>>31;
+    x=(flag&~x)|(~flag&x); //x为非正数则不变 ,x 为负数 则相当于按位取反
+    b16=!!(x>>16) <<4; //如果高16位不为0,则我们让b16=16
+    x>>=b16; //如果高16位不为0 则我们右移动16位 来看高16位的情况，如果为0,则x不移动
+    //下面过程基本类似
+    //看x原来的16-24位的情况
+    b8=!!(x>>8)<<3;
+    x >>= b8;
+    //看x原来24-28位的情况
+    b4 = !!(x >> 4) << 2;
+    x >>= b4;
+    b2 = !!(x >> 2) << 1;
+    x >>= b2;
+    b1 = !!(x >> 1);
+    x >>= b1;
+    b0 = x;
+  return b0+b1+b2+b4+b8+b16+1;
 }
 //float
 /* 
@@ -272,9 +335,24 @@ int howManyBits(int x) {
  *   Legal ops: Any integer/unsigned operations incl. ||, &&. also if, while
  *   Max ops: 30
  *   Rating: 4
+ * 输出2*f的二进制表示
  */
 unsigned floatScale2(unsigned uf) {
-  return 2;
+  unsigned s = (uf >> 31) &1; //取符号位
+  unsigned e = (uf >> 23) & 0xFF;//取指数部分
+  unsigned f = (uf & 0x7FFFFF);//取表示f的23位,f需向右移23位再乘以2的e次方才可以
+  //当e为全1时，表示特殊值，全0时表示非规格化值，非0非255时，表示规格化值
+  if(e == 0xff){
+     return uf;
+  }
+  if(e){
+    //e不为全0，表示规格化值,f*2相当于e+1
+    e++;
+    return (s << 31) | (e<<23) | f;
+  }
+  //e为0，表示非规格化值,此时e = 1-bias,e为固定的,2*f相当于f左移一位
+  f <<= 1;
+  return (s << 31)|f;
 }
 /* 
  * floatFloat2Int - Return bit-level equivalent of expression (int) f
@@ -287,9 +365,38 @@ unsigned floatScale2(unsigned uf) {
  *   Legal ops: Any integer/unsigned operations incl. ||, &&. also if, while
  *   Max ops: 30
  *   Rating: 4
+ *  将float转为int,需要考虑向偶舍入
+ *  先找到浮点数的f和e部分，然后判断e-bias是否大于23，如果大于23，则需要向左移动，如果刚好为23，则f不变,将f所表示的二进制当作int来读取即可
+ *  如果小于23，说明f需要向右移动
+ *  这是因为将f部分看作整数,意味着f*2^23,因为在浮点数表示中,f这23位是小数点以后的数,相当于f1*1/2 + f2*1/4 + .... + f23*2^-23(假设f表示为f1f2f3..f23)
+ * 
  */
 int floatFloat2Int(unsigned uf) {
-  return 2;
+  unsigned s = (uf >> 31) &1; //取符号位
+  unsigned e = (uf >> 23) & 0xFF;//取指数部分
+  unsigned f = (uf & 0x7FFFFF);//取表示f的23位
+  int E = e-127;
+  if(E>=31){
+     //E>31，说明f超出int的范围
+     return 0x80000000u;
+  }
+  if(E < 0){
+    //E小于0，表示f为0.x,转int后为0
+    return 0;
+  }
+  //规格化数，需要加1
+  f |= 1<<23;
+  if(E < 23){
+    //此时f右移
+    f >>= (23-E);
+  }else{
+    //左移
+    f <<= (E-23);
+  }
+  if(s){
+    return -f;
+  }
+  return f;
 }
 /* 
  * floatPower2 - Return bit-level equivalent of the expression 2.0^x
@@ -303,7 +410,35 @@ int floatFloat2Int(unsigned uf) {
  *   Legal ops: Any integer/unsigned operations incl. ||, &&. Also if, while 
  *   Max ops: 30 
  *   Rating: 4
+ *   计算2.0的x次方,太小返回0,太大返回+INF
+ *   X为2.0的指数部分
+ *   2.0用浮点表示为:s为0，e的部分为127+1，f的部分为0
+ *   2.0的x次方，在e部分加上x即可，但只有x>=-126(此时e部分才不为0)的时候才成立
+ *   当x<-148时,2.0^x的e部分为全0(此时为2^-23 * 2^-126)
+ *   当x > 127时，2.0^x的e部分为全1
  */
 unsigned floatPower2(int x) {
-    return 2;
+    if(x > 127){
+      //此时，到达足够大，返回+inf,即让e的部分为全1
+      return 0xff << 23;
+    }
+    if(x < -149){
+      //足够小
+      return 0;
+    }
+    // 判断是否在规格化的范围内
+    // E = e - Bias → e = E + Bias,  E = x, Bias = 127.
+    if(x >= -126){
+      unsigned exp = x + 127;
+      return exp << 23;
+    } 
+
+    // 非规格化的数，因为x < -126，所以修改frac中的值即可。 
+    // 对于非规格化的数，E = -126
+    // 由于x处于-126到-148这个区间，因此e部分必须为0，此时指数部分才能得到最小的-127,然后再根据f部分1所在的位置，最多可以有-23位
+    // 因此最多可为2的-148次方
+    // 设 f = 2 ^ (a - 23)。 a代表1所在的位置索引，0（右） → 22（左）
+    // x = -126 + (a - 23)
+    // a = x + 126 + 23 = x + 149 (此时 -148<= x <= -126)
+    return 1 << (x + 149);
 }
