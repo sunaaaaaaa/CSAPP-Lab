@@ -41,7 +41,8 @@ int main(int argc, char *argv[])
      * fantastic GUI on it. */
 
     /* When run with no arguments, the bomb reads its input lines 
-     * from standard input. */
+     * from standard input. 
+     * 当该程序没有运行参数的时候，炸弹将读取标准输入*/
     if (argc == 1) {  
 	infile = stdin;
     } 
@@ -49,7 +50,9 @@ int main(int argc, char *argv[])
     /* When run with one argument <file>, the bomb reads from <file> 
      * until EOF, and then switches to standard input. Thus, as you 
      * defuse each phase, you can add its defusing string to <file> and
-     * avoid having to retype it. */
+     * avoid having to retype it.
+     * 当运行参数为1个的时候，炸弹程序将读取运行参数所指定的文件并直到结束，然后切换到标准输入 
+     * 因此，当你破解炸弹程序的每个阶段时，可以将破解字符串输入到一个文件中并保存，这样就不用每次都重新输入破解字符串了*/
     else if (argc == 2) {
 	if (!(infile = fopen(argv[1], "r"))) {
 	    printf("%s: Error: Couldn't open %s\n", argv[0], argv[1]);
@@ -57,18 +60,23 @@ int main(int argc, char *argv[])
 	}
     }
 
-    /* You can't call the bomb with more than 1 command line argument. */
+    /* You can't call the bomb with more than 1 command line argument. 
+       不能为炸弹程序传入超过1个以上的运行参数*/
     else {
 	printf("Usage: %s [<input_file>]\n", argv[0]);
 	exit(8);
     }
 
-    /* Do all sorts of secret stuff that makes the bomb harder to defuse. */
+    /* Do all sorts of secret stuff that makes the bomb harder to defuse. 
+       初始化炸弹程序*/
     initialize_bomb();
 
     printf("Welcome to my fiendish little bomb. You have 6 phases with\n");
     printf("which to blow yourself up. Have a nice day!\n");
-
+    
+    /*
+      开始破解炸弹程序，需要查看bomb执行文件中的汇编代码，来得到破解炸弹的字符串
+    */
     /* Hmm...  Six phases must be more secure than one phase! */
     input = read_line();             /* Get input                   */
     phase_1(input);                  /* Run the phase               */
