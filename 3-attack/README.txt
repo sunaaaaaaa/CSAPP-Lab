@@ -21,7 +21,7 @@ Text file containing 4-byte signature required for this lab instance.
 Source code for gadget farm present in this instance of rtarget.  You
 can compile (use flag -Og) and disassemble it to look for gadgets.
 
-     hex2raw
+     hex2raw   将十六进制字符对转换为原始字符串
 
 Utility program to generate byte sequences.  See documentation in lab
 handout.
