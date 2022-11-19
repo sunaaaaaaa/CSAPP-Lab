@@ -165,6 +165,53 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char *argv[MAXARGS];//存储解析后的参数
+    char buf[MAXLINE];
+    int bg;//job 是否 后台运行
+    pid_t pid;//创建的子进程的pid，用于构建job
+    sigset_t mask_all, mask_chld, prev;
+
+    strcpy(buf, cmdline);
+    bg = parseline(buf, argv);//解析命令行，返回值为该任务是否为一个前台任务
+    if(argv[0] == NULL){
+        return; //空命令行，不执行操作
+    }
+    //如果不是内置命令，则fork子进程
+    if(!builtin_cmd(argv)){
+        //注意，参考书籍P542页，因为我们设置了SIGCHLD信号的回调
+        //为了防止，父进程fork子进程之后，还未执行到addjobs的逻辑，子进程就执行完毕，发送了SIGCHLD信号
+        //导致父进程处理信号，先调用了deletejobs而导致错误，此时应该先屏蔽SIGCHLD信号
+        sigemptyset(&mask_chld);
+        sigaddset(&mask_chld, SIGCHLD);
+        // Signal(SIGCHLD, sigchld_handler);//注册SIGCHLD信号的处理函数，用于父进程回收子进程的资源
+        sigprocmask(SIG_BLOCK, &mask_chld, &prev);//父进程阻塞SIGCHLD信号
+        //创建子进程,environ为父进程的环境变量
+        if((pid = fork()) == 0){
+            //由于子进程完全的复制了父进程，所以需要先解除子进程对SIGCHLD信号的阻塞
+            sigprocmask(SIG_SETMASK, &prev, NULL);
+            setpgid(0, 0);
+            if(execve(argv[0], argv, environ)){
+                printf("%s: Command not found\n", argv[0]);
+                exit(0);
+            }
+        }
+
+        //此处父进程执行，子进程的逻辑已经被更改,会重新执行自己的main函数
+        //父进程阻塞所有信号，防止被打断去执行别的处理
+        sigfillset(&mask_all);
+        sigprocmask(SIG_BLOCK, &mask_all, NULL);
+        //添加任务，fg为1，bg为2
+        addjob(jobs, pid, bg + 1, cmdline);
+        //恢复原来的状态,不再阻塞SIGCHLD
+        sigprocmask(SIG_SETMASK, &prev, NULL);
+        if(!bg){
+            //前台执行，父进程等待子进程执行完毕
+            waitfg(pid);
+        } else {
+            printf("[%d] (%d) %s\n", pid2jid(pid), pid, cmdline);//返回main函数，等待下一个任务
+        }
+    }
+
     return;
 }
 
@@ -231,6 +278,16 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+    if(!strcmp(argv[0], "quit")){
+        exit(0); //quit 命令
+    }else if(!strcmp(argv[0], "jobs")){
+        listjobs(jobs);
+        return 1;
+    }else if(!(strcmp(argv[0], "fg")) || !(strcmp(argv[0], "bg"))){
+        do_bgfg(argv);
+        return 1;
+    }
+
     return 0;     /* not a builtin command */
 }
 
@@ -245,8 +302,27 @@ void do_bgfg(char **argv)
 /* 
  * waitfg - Block until process pid is no longer the foreground process
  */
+volatile sig_atomic_t wait_pid;
 void waitfg(pid_t pid)
 {
+    sigset_t mask, prev;
+    sigemptyset(&mask);
+    while(1){
+        sigprocmask(SIG_SETMASK, &mask, &prev);
+        if(!fgpid(jobs)){
+            return;
+        }
+        sleep(1);
+        sigprocmask(SIG_SETMASK, &prev, NULL);
+    }
+    
+    // sigprocmask(SIG_SETMASK, &mask, &prev);
+    // wait_pid = pid;
+    // while(wait_pid != -1){
+    //     sleep(1);
+    //     //sigsuspend(&prev);
+    // }
+    // sigprocmask(SIG_SETMASK, &prev, NULL);
     return;
 }
 
@@ -263,6 +339,36 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+    int olderrno = errno;
+    pid_t pid;
+    int status;//进程状态
+    sigset_t mask_all, prev;
+    sigfillset(&mask_all);
+    //父进程进行处理时，屏蔽信息，保证原子性
+    while((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0){
+        sigprocmask(SIG_BLOCK, &mask_all, &prev);
+        //如果子进程正常结束
+        if(WIFEXITED(status)){
+            deletejob(jobs, pid);
+        }else if(WIFSTOPPED(status)){
+            //如果进程状态为停止，更新job状态
+            printf("Job [%d] (%d) stopped by signal 20 \n", pid2jid(pid), pid);
+            (*getjobpid(jobs, pid)).state = ST;
+        }else if(WIFSIGNALED(status)){
+            //进程状态为终止状态
+            printf("Job [%d] (%d) terminated by signal %d \n", pid2jid(pid), pid, WTERMSIG(status));
+            deletejob(jobs, pid);
+        }
+        if(pid == wait_pid){
+            wait_pid = -1;
+        }
+        sigprocmask(SIG_SETMASK, &prev, NULL);
+    }
+
+    if(errno != ECHILD){
+        unix_error("waitpid error.\n");
+    }
+    errno = olderrno;
     return;
 }
 
@@ -273,6 +379,8 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
+    //终止前台子进程
+    kill(fgpid(jobs), sig);
     return;
 }
 
@@ -283,6 +391,7 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
+    kill(fgpid(jobs), sig);
     return;
 }
 
