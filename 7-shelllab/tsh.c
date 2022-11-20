@@ -190,7 +190,7 @@ void eval(char *cmdline)
             //由于子进程完全的复制了父进程，所以需要先解除子进程对SIGCHLD信号的阻塞
             sigprocmask(SIG_SETMASK, &prev, NULL);
             setpgid(0, 0);
-            if(execve(argv[0], argv, environ)){
+            if(execve(argv[0], argv, environ) < 0){
                 printf("%s: Command not found\n", argv[0]);
                 exit(0);
             }
@@ -208,7 +208,7 @@ void eval(char *cmdline)
             //前台执行，父进程等待子进程执行完毕
             waitfg(pid);
         } else {
-            printf("[%d] (%d) %s\n", pid2jid(pid), pid, cmdline);//返回main函数，等待下一个任务
+            printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);//返回main函数，等待下一个任务
         }
     }
 
@@ -296,6 +296,56 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
+    char* arg1 = argv[1];
+    int pid;
+    int jid;
+    struct job_t *cur;//当前的任务
+    if(arg1 == NULL){
+        printf("%s command requires PID or %%jobid argument\n", argv[0]);
+        return;
+    }
+
+    //参数为jid
+    if(arg1[0] == '%'){
+        jid = atoi(((char *)arg1 + 1));
+        if(jid == 0 && strcmp(((char *)arg1 + 1),"0")){
+            printf("%s argument must be a PID or %%jobid\n", argv[0]);
+            return;
+        }
+        cur = getjobjid(jobs, jid);
+        if(cur == NULL){
+            printf("%s: No such job\n", arg1);
+            return;
+        }
+        pid = cur->pid;
+    }else{
+        //参数为pid
+        pid = atoi(arg1);
+        if(pid == 0 && strcmp(arg1, "0")){
+            printf("%s: argument must be a PID or %%jobid\n", argv[0]);
+            return;
+        }
+
+        cur = getjobpid(jobs, pid);
+        if(cur == NULL){
+            printf("(%d): No such process\n", pid);
+            return;
+        }
+    }
+
+    //退出该进程，重新执行
+    kill(-pid, SIGCONT);
+
+    //匹配前台还是后台任务，strcmp匹配成功返回0
+    if(strcmp(argv[0], "bg")){
+        //前台任务
+        cur->state = FG;
+        waitfg(pid);
+    }else{
+        //后台任务
+        cur->state = BG;
+        printf("[%d] (%d) %s", pid2jid(pid), pid, cur->cmdline);
+    }
     return;
 }
 
@@ -317,6 +367,10 @@ void waitfg(pid_t pid)
     }
     
     // sigprocmask(SIG_SETMASK, &mask, &prev);
+    // if(wait_pid == -1){
+	// 	wait_pid = 0;
+	// 	return;
+	// }
     // wait_pid = pid;
     // while(wait_pid != -1){
     //     sleep(1);
@@ -343,8 +397,8 @@ void sigchld_handler(int sig)
     pid_t pid;
     int status;//进程状态
     sigset_t mask_all, prev;
-    sigfillset(&mask_all);
-    //父进程进行处理时，屏蔽信息，保证原子性
+    sigfillset(&mask_all);//父进程进行处理时，屏蔽信息，保证原子性
+    //设置WNOHANG选项，只等待所有的僵死进程
     while((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0){
         sigprocmask(SIG_BLOCK, &mask_all, &prev);
         //如果子进程正常结束
@@ -365,9 +419,6 @@ void sigchld_handler(int sig)
         sigprocmask(SIG_SETMASK, &prev, NULL);
     }
 
-    if(errno != ECHILD){
-        unix_error("waitpid error.\n");
-    }
     errno = olderrno;
     return;
 }
@@ -380,7 +431,7 @@ void sigchld_handler(int sig)
 void sigint_handler(int sig) 
 {
     //终止前台子进程
-    kill(fgpid(jobs), sig);
+    kill(-fgpid(jobs), sig);
     return;
 }
 
@@ -391,7 +442,7 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
-    kill(fgpid(jobs), sig);
+    kill(-fgpid(jobs), sig);
     return;
 }
 
