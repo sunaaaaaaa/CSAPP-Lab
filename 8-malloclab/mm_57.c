@@ -48,22 +48,26 @@ team_t team = {
 #define WSIZE 4
 #define DSIZE 8
 #define INITCHUNSIZE (1 << 6)
-#define CHUNKSIZE (1 << 12)
+#define CHUNKSIZE (1<<12)
 
-#define MAX(x, y) ((x) > (y) ? (x) : (y))
+#define MAX(x, y) ((x) > (y)? (x) : (y))
 #define PACK(size, alloc) ((size) | (alloc)) //将分配块的大小和最后一位进行按位或
 #define GET(p) (*(unsigned int *)(p)) //获取一个字的内容
-#define PUT(p, val)(*(unsigned int *)(p) = (val)) //为一个字赋值
+#define PUT(p, val) (*(unsigned int *)(p) = (val)) //为一个字赋值
+
 #define GET_SIZE(p) (GET(p) & ~0x7) //获取header或者footer存储的大小
 #define GET_ALLOC(p) (GET(p) & 0x1) //获取header或者footer存储的分配位
+
 #define HDRP(bp) ((char *)(bp) - WSIZE) //返回当前bp指向的块的header指针，bp需要是分配块的内容部分的首地址（不包括头部）
 #define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE) //返回当前分配块的footer指针
+
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE))) //获取bp指向的块的下一个块的内容部分的地址
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE))) //获取bp指向的块的前一个块的内容部分的地址
 //先计算bp的头部的位置，使用GET_SIZE宏，计算得到当前块的大小，由于bp指向当前块的header之后的首地址，因此加上size之后，实际指向的是下一个块的header之后的内容
 
 //使用隐式链表法
 static char *heap_listp;
+static char *pre_listp;
 
 static void *extend_heap(size_t words); //扩展
 static void *find_fit(size_t size); //寻找合适的块
@@ -83,7 +87,7 @@ int mm_init(void)
     PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));//序言块footer
     PUT(heap_listp + (3 * WSIZE), PACK(0, 1));//结尾块，只占一个字，包含一个header，内容全0
     heap_listp += (2 * WSIZE); //序言块header之后的首地址，相当于序言块的data部分，但是序言块data为0，因此指向序言块的footer
-
+    //pre_listp = heap_listp;
     //extend
     if(extend_heap(CHUNKSIZE / WSIZE) == NULL){
         return -1;
@@ -150,10 +154,8 @@ void *mm_realloc(void *ptr, size_t size)
     }
     if(size == 0){
         mm_free(ptr);
-        return NULL;
     }
 
-    void *oldptr = ptr;
     void *newptr;
     size_t copySize;
     
@@ -164,7 +166,7 @@ void *mm_realloc(void *ptr, size_t size)
     copySize = GET_SIZE(HDRP(newptr));
     if (size < copySize)
       copySize = size;
-    memcpy(newptr, oldptr, copySize - WSIZE);
+    memcpy(newptr, ptr, copySize - WSIZE);
     mm_free(ptr);
     return newptr;
 }
@@ -200,8 +202,11 @@ static void* coalesce(void *bp){
 
     //如果prev和next都是已分配的
     if(prev && next){
+        //pre_listp = bp;
         return bp;
-    }else if(prev && !next){
+    }
+    
+    if(prev && !next){
         //next为未分配的，当前块和next合并
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
@@ -214,16 +219,18 @@ static void* coalesce(void *bp){
         bp = PREV_BLKP(bp);//更新bp，指向prev
     }else{
         //前后都是空闲的,header使用prev的header，footer使用next的footer
-        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
+    //pre_listp = bp;
     return bp;
 }
 
 static void *find_fit(size_t size){
     char *bp = heap_listp;//获取首块(序言块)的地址
+    //char *bp = pre_listp;
     size_t alloc;
     size_t asize;
     //循环获取可分配块
@@ -239,6 +246,15 @@ static void *find_fit(size_t size){
         }
         return bp;
     }
+    // bp = heap_listp;
+    // while (bp != pre_listp) {
+    //     bp = NEXT_BLKP(bp);
+    //     alloc = GET_ALLOC(HDRP(bp));
+    //     if (alloc) continue;
+    //     asize = GET_SIZE(HDRP(bp));
+    //     if (asize < size) continue;
+    //     return bp;
+    // } 
     return NULL;
 }
 
@@ -253,12 +269,13 @@ static void place(void *bp, size_t size){
         PUT(FTRP(bp), PACK(size, 1));
         //形成一个新的块
         PUT(HDRP(NEXT_BLKP(bp)), PACK(asize - size, 0));
-        PUT(HDRP(NEXT_BLKP(bp)), PACK(asize - size, 0));
+        PUT(FTRP(NEXT_BLKP(bp)), PACK(asize - size, 0));
     }else{
         //如果没有两个DSIZE，那么将当前块切分成两个块，剩余的块无法成为一个新的块
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
     }
+    //pre_listp = bp;
 }
 
 

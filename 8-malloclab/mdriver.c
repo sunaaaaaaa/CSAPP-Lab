@@ -253,7 +253,9 @@ int main(int argc, char **argv)
 	/* Evaluate the libc malloc package using the K-best scheme */
 	for (i=0; i < num_tracefiles; i++) {
 	    trace = read_trace(tracedir, tracefiles[i]);
+		//printf("xxx\n");
 	    libc_stats[i].ops = trace->num_ops;
+		//printf("yyy\n");
 	    if (verbose > 1)
 		printf("Checking libc malloc for correctness, ");
 	    libc_stats[i].valid = eval_libc_valid(trace, i);
@@ -290,9 +292,12 @@ int main(int argc, char **argv)
     /* Evaluate student's mm malloc package using the K-best scheme */
     for (i=0; i < num_tracefiles; i++) {
 	trace = read_trace(tracedir, tracefiles[i]);
+	//printf("xxx\n");
 	mm_stats[i].ops = trace->num_ops;
+	//printf("yyy%d\n",verbose);
 	if (verbose > 1)
 	    printf("Checking mm_malloc for correctness, ");
+	////printf("xxxxxx\n");
 	mm_stats[i].valid = eval_mm_valid(trace, i, &ranges);
 	if (mm_stats[i].valid) {
 	    if (verbose > 1)
@@ -491,6 +496,7 @@ static trace_t *read_trace(char *tracedir, char *filename)
     /* Read the trace file header */
     strcpy(path, tracedir);
     strcat(path, filename);
+	
     if ((tracefile = fopen(path, "r")) == NULL) {
 	sprintf(msg, "Could not open %s in read_trace", path);
 	unix_error(msg);
@@ -504,7 +510,6 @@ static trace_t *read_trace(char *tracedir, char *filename)
     if ((trace->ops = 
 	 (traceop_t *)malloc(trace->num_ops * sizeof(traceop_t))) == NULL)
 	unix_error("malloc 2 failed in read_trace");
-
     /* We'll keep an array of pointers to the allocated blocks here... */
     if ((trace->blocks = 
 	 (char **)malloc(trace->num_ids * sizeof(char *))) == NULL)
@@ -526,19 +531,22 @@ static trace_t *read_trace(char *tracedir, char *filename)
 	    trace->ops[op_index].index = index;
 	    trace->ops[op_index].size = size;
 	    max_index = (index > max_index) ? index : max_index;
-	    break;
+	    //printf("a\n");
+		break;
 	case 'r':
 	    fscanf(tracefile, "%u %u", &index, &size);
 	    trace->ops[op_index].type = REALLOC;
 	    trace->ops[op_index].index = index;
 	    trace->ops[op_index].size = size;
 	    max_index = (index > max_index) ? index : max_index;
-	    break;
+	    //printf("r\n");
+		break;
 	case 'f':
 	    fscanf(tracefile, "%ud", &index);
 	    trace->ops[op_index].type = FREE;
 	    trace->ops[op_index].index = index;
-	    break;
+	    //printf("f\n");
+		break;
 	default:
 	    printf("Bogus type character (%c) in tracefile %s\n", 
 		   type[0], path);
@@ -550,7 +558,6 @@ static trace_t *read_trace(char *tracedir, char *filename)
     fclose(tracefile);
     assert(max_index == trace->num_ids - 1);
     assert(trace->num_ops == op_index);
-    
     return trace;
 }
 
