@@ -89,7 +89,8 @@ int mm_init(void)
 
     explict_list_header = blk_heap + (1 * WSIZE);
     blk_heap += (4 * WSIZE);//堆指向序言块的data部分，data部分为空，因此指向footer
-    next_match = blk_heap;
+    //next_match = blk_heap;
+    next_match = NULL;
     //创建堆的其余空间
     if(extend_heap(HEAPSIZE / WSIZE) == NULL){
         printf("create heap failed\n");
@@ -221,57 +222,46 @@ static void *blk_merge(void *blk){
         //此时next_match指向合并后的块的内部
         next_match = blk;
     }
+    next_match = blk;
     blk_insert_list(blk);
     return blk;
 }
 
 static void *blk_find(size_t size){
 
-    char *blk = GET_WORD(GET_NEXT(explict_list_header));
+    char *blk;
     size_t alloc;
     size_t blk_size;
 
+    // if(next_match != NULL){
+    //     blk = next_match;
+    //     while(blk != NULL){
+    //         alloc = GET_ALLOC(GET_HEADER(blk));
+    //         if(alloc == 1){
+    //             printf("WARNING\n");
+    //             break;
+    //         }
+    //         blk_size = GET_SIZE(GET_HEADER(blk));
+    //         if(blk_size < size){
+    //             blk = GET_WORD(GET_NEXT(blk));
+    //             continue;
+    //         }
+    //         //printf("use next match\n");
+    //         next_match = GET_WORD(GET_NEXT(blk));
+    //         return blk;
+    //     }
+    // }
+    
+    blk = GET_WORD(GET_NEXT(explict_list_header));
     while(blk != NULL){
         blk_size = GET_SIZE(GET_HEADER(blk));
         if(blk_size < size){
             blk = GET_WORD(GET_NEXT(blk));
             continue;
         }
+        next_match = GET_WORD(GET_NEXT(blk));
         return blk;
     }
-
-    //char *blk = blk_heap;
-    // char *blk = next_match;
-    // size_t alloc;
-    // size_t blk_size;
-
-    // while(GET_SIZE(GET_HEADER(NEXT_BLKP(blk))) > 0){
-    //     blk = NEXT_BLKP(blk);
-    //     alloc = GET_ALLOC(GET_HEADER(blk));
-    //     if(alloc == 1){
-    //         continue;
-    //     }
-    //     blk_size = GET_SIZE(GET_HEADER(blk));
-    //     if(blk_size < size){
-    //         continue;
-    //     }
-    //     next_match = blk;
-    //     return blk;
-    // }
-    // blk = blk_heap;
-    // while(blk != next_match){
-    //     blk = NEXT_BLKP(blk);
-    //     alloc = GET_ALLOC(GET_HEADER(blk));
-    //     if(alloc == 1){
-    //         continue;
-    //     }
-    //     blk_size = GET_SIZE(GET_HEADER(blk));
-    //     if(blk_size < size){
-    //         continue;
-    //     }
-    //     next_match = blk;
-    //     return blk;
-    // }
     return NULL;
 }
 
