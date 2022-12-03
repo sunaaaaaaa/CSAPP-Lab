@@ -49,9 +49,14 @@ team_t team = {
 #define NEXT_BLKP(p) ((char *)(p) + GET_SIZE(((char *)(p) - WSIZE)))
 #define PREV_BLKP(p) ((char *)(p) - GET_SIZE(((char *)(p) - DSIZE)))
 
+//显式链表，获取前驱和后继,前驱后继各占一个WSIZE
+#define GET_PREV(p) ((char *)(p))
+#define GET_NEXT(p) ((char *)(p) + WSIZE)
 
 static char *blk_heap;
 static char *next_match;
+static char *explict_list_header; //显式链表头部
+
 //扩展堆
 static void *extend_heap(size_t words);
 //块的合并
@@ -60,23 +65,30 @@ static void *blk_merge(void *blk);
 static void *blk_split(void *blk, size_t size);
 //块匹配算法
 static void *blk_find(size_t size);
-
+//空闲块插入链表
+static void blk_insert_list(void *blk);
+//空闲块从链表删除
+static void blk_remove_list(void *blk);
 
 int mm_init(void)
 {
     //首先创建一个序言块以及一个结尾块，序言块需要2个W，结尾块需要一个W，由于双字对齐，申请四个
-    if((blk_heap = mem_sbrk(4 * WSIZE)) == (void *)(-1)){
+    if((blk_heap = mem_sbrk(6 * WSIZE)) == (void *)(-1)){
         printf("init heap failed\n");
         return -1;
     }
     PUT_WORD(blk_heap, 0);//对齐字节
+    //explict list header,header的prev和next都设置为0
+    PUT_WORD(blk_heap + (1 * WSIZE), 0);
+    PUT_WORD(blk_heap + (2 * WSIZE), 0);
     //序言块占2B
-    PUT_WORD(blk_heap + WSIZE, BLK_INIT(DSIZE, 1));
-    PUT_WORD(blk_heap + (2 * WSIZE), BLK_INIT(DSIZE, 1));
+    PUT_WORD(blk_heap + (3 * WSIZE), BLK_INIT(DSIZE, 1));
+    PUT_WORD(blk_heap + (4 * WSIZE), BLK_INIT(DSIZE, 1));
     //结尾块，结尾块header长度要求为0，分配字段为1
-    PUT_WORD(blk_heap + (3 * WSIZE), BLK_INIT(0, 1));
+    PUT_WORD(blk_heap + (5 * WSIZE), BLK_INIT(0, 1));
 
-    blk_heap += (2 * WSIZE);//堆指向序言块的data部分，data部分为空，因此指向footer
+    explict_list_header = blk_heap + (1 * WSIZE);
+    blk_heap += (4 * WSIZE);//堆指向序言块的data部分，data部分为空，因此指向footer
     next_match = blk_heap;
     //创建堆的其余空间
     if(extend_heap(HEAPSIZE / WSIZE) == NULL){
@@ -156,7 +168,7 @@ static void *extend_heap(size_t words){
     char *new_blk;
     size_t real_size;
     //字节对齐
-    real_size = (words % 2) ? (words + 1) * WSIZE : (words * WSIZE);
+    real_size = (words % 2) ? (words + 1) * DSIZE : (words * DSIZE);
     if((new_blk = mem_sbrk(real_size)) == -1){
         printf("extend heap failed\n");
         return NULL;
@@ -165,6 +177,8 @@ static void *extend_heap(size_t words){
     //因此拿扩充前的结尾块当作扩展部分的header，然后创建一个新的footer
     PUT_WORD(GET_HEADER(new_blk), BLK_INIT(real_size, 0));
     PUT_WORD(GET_FOOTER(new_blk), BLK_INIT(real_size, 0));
+    PUT_WORD(GET_PREV(new_blk), 0);
+    PUT_WORD(GET_NEXT(new_blk), 0);
     //创建新的结尾块
     PUT_WORD(GET_HEADER(NEXT_BLKP(new_blk)), BLK_INIT(0, 1));
     //如果前一个块是空闲的，需要进行合并
@@ -177,20 +191,25 @@ static void *blk_merge(void *blk){
     size_t size = GET_SIZE(GET_HEADER(blk));
 
     if(prev_alloc && next_alloc){
+        blk_insert_list(blk);
         return blk;
     }
     if(!prev_alloc && next_alloc){
+        blk_remove_list(PREV_BLKP(blk));
         //合并前面的
         size += GET_SIZE(GET_HEADER(PREV_BLKP(blk)));
         PUT_WORD(GET_FOOTER(blk), BLK_INIT(size, 0));//更新当前块的footer
         PUT_WORD(GET_HEADER(PREV_BLKP(blk)), BLK_INIT(size, 0));
         blk = PREV_BLKP(blk);
     }else if(prev_alloc && !next_alloc){
+        blk_remove_list(NEXT_BLKP(blk));
         //合并后面的
         size += GET_SIZE(GET_HEADER(NEXT_BLKP(blk)));
         PUT_WORD(GET_HEADER(blk), BLK_INIT(size, 0));
         PUT_WORD(GET_FOOTER(blk), BLK_INIT(size, 0));
     }else{
+        blk_remove_list(PREV_BLKP(blk));
+        blk_remove_list(NEXT_BLKP(blk));
         size += GET_SIZE(GET_HEADER(PREV_BLKP(blk)));
         size += GET_SIZE(GET_FOOTER(NEXT_BLKP(blk)));
         PUT_WORD(GET_HEADER(PREV_BLKP(blk)), BLK_INIT(size, 0));
@@ -202,43 +221,57 @@ static void *blk_merge(void *blk){
         //此时next_match指向合并后的块的内部
         next_match = blk;
     }
+    blk_insert_list(blk);
     return blk;
 }
 
 static void *blk_find(size_t size){
 
-    //char *blk = blk_heap;
-    char *blk = next_match;
+    char *blk = GET_WORD(GET_NEXT(explict_list_header));
     size_t alloc;
     size_t blk_size;
 
-    while(GET_SIZE(GET_HEADER(NEXT_BLKP(blk))) > 0){
-        blk = NEXT_BLKP(blk);
-        alloc = GET_ALLOC(GET_HEADER(blk));
-        if(alloc == 1){
-            continue;
-        }
+    while(blk != NULL){
         blk_size = GET_SIZE(GET_HEADER(blk));
         if(blk_size < size){
+            blk = GET_WORD(GET_NEXT(blk));
             continue;
         }
-        next_match = blk;
         return blk;
     }
-    blk = blk_heap;
-    while(blk != next_match){
-        blk = NEXT_BLKP(blk);
-        alloc = GET_ALLOC(GET_HEADER(blk));
-        if(alloc == 1){
-            continue;
-        }
-        blk_size = GET_SIZE(GET_HEADER(blk));
-        if(blk_size < size){
-            continue;
-        }
-        next_match = blk;
-        return blk;
-    }
+
+    //char *blk = blk_heap;
+    // char *blk = next_match;
+    // size_t alloc;
+    // size_t blk_size;
+
+    // while(GET_SIZE(GET_HEADER(NEXT_BLKP(blk))) > 0){
+    //     blk = NEXT_BLKP(blk);
+    //     alloc = GET_ALLOC(GET_HEADER(blk));
+    //     if(alloc == 1){
+    //         continue;
+    //     }
+    //     blk_size = GET_SIZE(GET_HEADER(blk));
+    //     if(blk_size < size){
+    //         continue;
+    //     }
+    //     next_match = blk;
+    //     return blk;
+    // }
+    // blk = blk_heap;
+    // while(blk != next_match){
+    //     blk = NEXT_BLKP(blk);
+    //     alloc = GET_ALLOC(GET_HEADER(blk));
+    //     if(alloc == 1){
+    //         continue;
+    //     }
+    //     blk_size = GET_SIZE(GET_HEADER(blk));
+    //     if(blk_size < size){
+    //         continue;
+    //     }
+    //     next_match = blk;
+    //     return blk;
+    // }
     return NULL;
 }
 
@@ -246,15 +279,48 @@ static void *blk_split(void *blk, size_t size){
     size_t blk_size = GET_SIZE(GET_HEADER(blk));
     size_t need_size = size;
     size_t leave_size = blk_size - need_size;
+    
+    blk_remove_list(blk);
+
     if(leave_size >= 2 * DSIZE){
         //进行块的切分
         PUT_WORD(GET_HEADER(blk), BLK_INIT(need_size, 1));
         PUT_WORD(GET_FOOTER(blk), BLK_INIT(need_size, 1));
         PUT_WORD(GET_HEADER(NEXT_BLKP(blk)), BLK_INIT(leave_size, 0));
         PUT_WORD(GET_FOOTER(NEXT_BLKP(blk)), BLK_INIT(leave_size, 0));
+        PUT_WORD(GET_PREV(NEXT_BLKP(blk)), 0);
+        PUT_WORD(GET_NEXT(NEXT_BLKP(blk)), 0);
+        blk_insert_list(NEXT_BLKP(blk));//切出来块需要插入到链表中
     }else{
         PUT_WORD(GET_HEADER(blk), BLK_INIT(blk_size, 1));
         PUT_WORD(GET_FOOTER(blk), BLK_INIT(blk_size, 1));
     }
     return blk;
+}
+
+//空闲块插入链表
+static void blk_insert_list(void *blk){
+    //头插
+    char *header_next = GET_NEXT(explict_list_header);
+    void *next = GET_WORD(header_next);
+
+    PUT_WORD(header_next, blk);
+    PUT_WORD(GET_PREV(blk), explict_list_header);
+    PUT_WORD(GET_NEXT(blk), next);
+    //空闲链表不为空
+    if (next != NULL){
+        PUT_WORD(GET_PREV(next), blk);
+    }
+}
+//空闲块从链表删除
+static void blk_remove_list(void *blk){
+    char *blk_next = GET_WORD(GET_NEXT(blk));
+    char *blk_prev = GET_WORD(GET_PREV(blk));
+    
+    if(blk_next != NULL){
+        PUT_WORD(GET_PREV(blk_next), blk_prev);
+    }
+    PUT_WORD(GET_NEXT(blk_prev), blk_next);
+    PUT_WORD(GET_PREV(blk), 0);
+    PUT_WORD(GET_NEXT(blk), 0);
 }
